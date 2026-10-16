@@ -17,23 +17,12 @@ jobs:
       - name: Get Latest Dropbear Version
         id: dropbear
         run: |
-          # 尝试源 1: 从 GitHub Release API 获取
+          # 尝试从 GitHub Release / Tags / 官方网页 获取
           VER=$(curl -s https://api.github.com/repos/mkj/dropbear/releases/latest | grep -oP '"tag_name":\s*"DROPBEAR_\K[0-9.]+' || true)
-          
-          # 尝试源 2: 从 GitHub Tags API 获取最新 tag
-          if [ -z "$VER" ]; then
-            VER=$(curl -s https://api.github.com/repos/mkj/dropbear/tags | grep -oP '"name":\s*"DROPBEAR_\K[0-9.]+' | head -1 || true)
-          fi
-
-          # 尝试源 3: 从官方网站页面抓取最新版本号
-          if [ -z "$VER" ]; then
-            VER=$(curl -s https://matt.ucc.asn.au/dropbear/dropbear.html | grep -oP 'dropbear-\K[0-9.]+(?=\.tar\.bz2)' | head -1 || true)
-          fi
-
-          # 兜底默认值
+          [ -z "$VER" ] && VER=$(curl -s https://api.github.com/repos/mkj/dropbear/tags | grep -oP '"name":\s*"DROPBEAR_\K[0-9.]+' | head -1 || true)
+          [ -z "$VER" ] && VER=$(curl -s https://matt.ucc.asn.au/dropbear/dropbear.html | grep -oP 'dropbear-\K[0-9.]+(?=\.tar\.bz2)' | head -1 || true)
           [ -z "$VER" ] && VER="2026.94"
 
-          echo "LATEST_VER=$VER" >> $GITHUB_ENV
           echo "dropbear_ver=$VER" >> $GITHUB_OUTPUT
 
       - name: Get Latest Release Tag from GitHub
@@ -45,10 +34,11 @@ jobs:
       - name: Compare Versions
         id: compare
         run: |
-          echo "Dropbear 最新版本: ${{ env.LATEST_VER }}"
+          LATEST_VER="${{ steps.dropbear.outputs.dropbear_ver }}"
+          echo "Dropbear 最新版本: ${LATEST_VER}"
           echo "当前 Release 版本: ${{ env.LATEST_TAG }}"
           
-          if [ "${{ env.LATEST_VER }}" = "${{ env.LATEST_TAG }}" ]; then
+          if [ "${LATEST_VER}" = "${{ env.LATEST_TAG }}" ]; then
             echo "✅ 版本一致，无需更新。"
             echo "should_build=false" >> $GITHUB_OUTPUT
           else
@@ -72,7 +62,7 @@ jobs:
       - name: Build All Architectures with Zig
         run: |
           chmod +x build.sh
-          ./build.sh  # 不传参数默认编译 amd64, arm64, armv7
+          ./build.sh
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -87,6 +77,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      DROPBEAR_VER: "${{ needs.check-version.outputs.dropbear_ver }}"
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -100,8 +92,7 @@ jobs:
       - name: Fetch and Parse Dropbear Changes
         id: parse_dropbear_changes
         run: |
-          VER="${{ needs.check-version.outputs.dropbear_ver }}"
-          # 防护检查：若 VER 仍意外为空则使用兜底值
+          VER="${DROPBEAR_VER}"
           [ -z "$VER" ] && VER="2026.94"
 
           curl -s https://matt.ucc.asn.au/dropbear/CHANGES -o DROPBEAR_CHANGES_RAW || \
@@ -124,40 +115,39 @@ jobs:
           echo "dropbear_release_notes<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGES_CONTENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+          echo "parsed_ver=$VER" >> $GITHUB_OUTPUT
 
       - name: Create or Update Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VER="${{ needs.check-version.outputs.dropbear_ver }}"
-          # 确保 VER 不为空
-          if [ -z "$VER" ]; then
-            echo "❌ 错误：dropbear_ver 变量为空，无法创建 Release！"
-            exit 1
-          fi
+          # 优先读取 env，兜底读取 parse_dropbear_changes 的输出
+          VER="${DROPBEAR_VER}"
+          [ -z "$VER" ] && VER="${{ steps.parse_dropbear_changes.outputs.parsed_ver }}"
+          [ -z "$VER" ] && VER="2026.94"
 
-          cat << 'EOF' > release_body.md
-          ## Dropbear SSH 纯静态编译版 (Zig + Musl)
-          
-          - **Dropbear 官方版本**: ${{ needs.check-version.outputs.dropbear_ver }}
-          - **构建工具**: Zig (`zig cc`) + Musl libc
-          - **包含架构**: `amd64` (x86_64), `arm64` (aarch64), `armv7`
-          - **特点**: 零动态库依赖，体积超小，开箱即用。
-          
-          ---
-          
-          ### 📜 Dropbear 官方变更日志 (${{ needs.check-version.outputs.dropbear_ver }})
-          ```text
-          ${{ steps.parse_dropbear_changes.outputs.dropbear_release_notes }}
-          ```
-          
-          ---
-          > 💡 **快速启动说明**:
-          > ```sh
-          > ./dropbearkey -t ed25519 -f host_key
-          > ./dropbear -F -E -p 2222 -r host_key
-          > ```
-          EOF
+          cat << EOF > release_body.md
+  ## Dropbear SSH 纯静态编译版 (Zig + Musl)
+  
+  - **Dropbear 官方版本**: ${VER}
+  - **构建工具**: Zig (\`zig cc\`) + Musl libc
+  - **包含架构**: \`amd64\` (x86_64), \`arm64\` (aarch64), \`armv7\`
+  - **特点**: 零动态库依赖，体积超小，开箱即用。
+  
+  ---
+  
+  ### 📜 Dropbear 官方变更日志 (${VER})
+  \`\`\`text
+  ${{ steps.parse_dropbear_changes.outputs.dropbear_release_notes }}
+  \`\`\`
+  
+  ---
+  > 💡 **快速启动说明**:
+  > \`\`\`sh
+  > ./dropbearkey -t ed25519 -f host_key
+  > ./dropbear -F -E -p 2222 -r host_key
+  > \`\`\`
+  EOF
 
           if gh release view "$VER" >/dev/null 2>&1; then
             echo "🔄 检测到 Tag $VER 已存在！正在执行覆盖更新..."
