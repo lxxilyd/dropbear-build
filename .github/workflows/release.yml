@@ -18,7 +18,7 @@ jobs:
         id: dropbear
         run: |
           VER=$(curl -s https://api.github.com/repos/mkj/dropbear/releases/latest | grep -oP '"tag_name":\s*"DROPBEAR_\K[0-9.]+' || true)
-          [ -z "$VER" ] && VER="2024.86"
+          [ -z "$VER" ] && VER="2026.94"
           echo "LATEST_VER=$VER" >> $GITHUB_ENV
           echo "dropbear_ver=$VER" >> $GITHUB_OUTPUT
 
@@ -87,13 +87,12 @@ jobs:
         id: parse_dropbear_changes
         run: |
           VER="${{ needs.check-version.outputs.dropbear_ver }}"
-          # 下载官方CHANGES文件
-          curl -s https://raw.githubusercontent.com/mkj/dropbear/sysoptions/CHANGES -o DROPBEAR_CHANGES_RAW || \
-          curl -s https://matt.ucc.asn.au/dropbear/CHANGES -o DROPBEAR_CHANGES_RAW
+          # 优先抓取官方 CHANGES 文件
+          curl -s https://matt.ucc.asn.au/dropbear/CHANGES -o DROPBEAR_CHANGES_RAW || \
+          curl -s https://raw.githubusercontent.com/mkj/dropbear/sysoptions/CHANGES -o DROPBEAR_CHANGES_RAW
           
           tr -d '\r' < DROPBEAR_CHANGES_RAW > DROPBEAR_CHANGES
           
-          # 提取当前版本的变更日志
           CHANGES_CONTENT=$(awk -v ver="$VER" '
             BEGIN { found = 0 }
             $0 ~ ver " - " || $0 ~ ver " " { found = 1; print; next }

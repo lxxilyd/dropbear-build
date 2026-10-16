@@ -31,24 +31,38 @@ fi
 
 echo -e "${GREEN}使用 Zig 版本: $(zig version)${NC}"
 
-# 2. 获取 Dropbear 最新版本号
-DROPBEAR_VERSION=$(curl -s https://api.github.com/repos/mkj/dropbear/releases/latest | grep -oP '"tag_name":\s*"DROPBEAR_\K[0-9]+' || true)
-[ -z "$DROPBEAR_VERSION" ] && DROPBEAR_VERSION="2024.86"
+# 2. 获取 Dropbear 最新版本号（精确匹配带小数的版本号，如 2026.94）
+DROPBEAR_VERSION=$(curl -s https://api.github.com/repos/mkj/dropbear/releases/latest | grep -oP '"tag_name":\s*"DROPBEAR_\K[0-9.]+' || true)
+[ -z "$DROPBEAR_VERSION" ] && DROPBEAR_VERSION="2026.94"
 echo -e "${GREEN}Dropbear 目标版本: ${DROPBEAR_VERSION}${NC}"
 
-# 3. 下载并解压源码（如果本地没有）
+# 3. 下载并解压源码（优先使用 Dropbear 官方及镜像 Tarball）
 if [ ! -d "dropbear-src" ]; then
     echo -e "${YELLOW}正在下载 Dropbear 源码...${NC}"
-    wget -q "https://matt.ucc.asn.au/dropbear/releases/dropbear-${DROPBEAR_VERSION}.tar.bz2" -O dropbear.tar.bz2 || \
-    wget -q "https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_${DROPBEAR_VERSION}.tar.gz" -O dropbear.tar.gz
-
     mkdir -p dropbear-src
-    if [ -f dropbear.tar.bz2 ]; then
+    
+    DOWNLOAD_SUCCESS=0
+    
+    # 尝试源 1: 官方 UCC 主站
+    if wget -q "https://matt.ucc.asn.au/dropbear/releases/dropbear-${DROPBEAR_VERSION}.tar.bz2" -O dropbear.tar.bz2; then
         tar xjf dropbear.tar.bz2 --strip-components=1 -C dropbear-src
         rm dropbear.tar.bz2
-    else
+        DOWNLOAD_SUCCESS=1
+    # 尝试源 2: 官方 Dropbear 镜像站
+    elif wget -q "https://dropbear.nl/mirror/releases/dropbear-${DROPBEAR_VERSION}.tar.bz2" -O dropbear.tar.bz2; then
+        tar xjf dropbear.tar.bz2 --strip-components=1 -C dropbear-src
+        rm dropbear.tar.bz2
+        DOWNLOAD_SUCCESS=1
+    # 尝试源 3: GitHub 源码 Tag 打包
+    elif wget -q "https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_${DROPBEAR_VERSION}.tar.gz" -O dropbear.tar.gz; then
         tar xzf dropbear.tar.gz --strip-components=1 -C dropbear-src
         rm dropbear.tar.gz
+        DOWNLOAD_SUCCESS=1
+    fi
+
+    if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
+        echo -e "${RED}❌ 错误：无法从任何已知源下载 Dropbear ${DROPBEAR_VERSION} 源码！${NC}"
+        exit 1
     fi
 fi
 
@@ -78,8 +92,7 @@ build_target() {
     export AR="zig ar"
     export RANLIB="zig ranlib"
 
-    # 配置 configure 参数
-    # 说明：--disable-zlib 可打包完全无外部依赖的极致体积包；如果需要压缩可以移除 --disable-zlib
+    # 配置 configure 参数（禁用外部库，实现纯静态单文件依赖）
     ./configure \
         --host="${host_gnu}" \
         --disable-zlib \
@@ -120,7 +133,6 @@ case "$ARCH_ARG" in
         build_target "arm64" "aarch64-linux-musl" "aarch64-linux"
         ;;
     armv7)
-        # ARMv7-a 带有 32位 musl 静态库
         build_target "armv7" "arm-linux-musleabihf" "arm-linux"
         ;;
     *)
