@@ -1,4 +1,4 @@
-name: Auto Build and Release Static Dropbear
+name: Auto Build and Release Static Dropbear (Zig)
 
 on:
   push: 
@@ -17,8 +17,22 @@ jobs:
       - name: Get Latest Dropbear Version
         id: dropbear
         run: |
+          # 尝试源 1: 从 GitHub Release API 获取
           VER=$(curl -s https://api.github.com/repos/mkj/dropbear/releases/latest | grep -oP '"tag_name":\s*"DROPBEAR_\K[0-9.]+' || true)
+          
+          # 尝试源 2: 从 GitHub Tags API 获取最新 tag
+          if [ -z "$VER" ]; then
+            VER=$(curl -s https://api.github.com/repos/mkj/dropbear/tags | grep -oP '"name":\s*"DROPBEAR_\K[0-9.]+' | head -1 || true)
+          fi
+
+          # 尝试源 3: 从官方网站页面抓取最新版本号
+          if [ -z "$VER" ]; then
+            VER=$(curl -s https://matt.ucc.asn.au/dropbear/dropbear.html | grep -oP 'dropbear-\K[0-9.]+(?=\.tar\.bz2)' | head -1 || true)
+          fi
+
+          # 兜底默认值
           [ -z "$VER" ] && VER="2026.94"
+
           echo "LATEST_VER=$VER" >> $GITHUB_ENV
           echo "dropbear_ver=$VER" >> $GITHUB_OUTPUT
 
@@ -87,18 +101,21 @@ jobs:
         id: parse_dropbear_changes
         run: |
           VER="${{ needs.check-version.outputs.dropbear_ver }}"
-          # 优先抓取官方 CHANGES 文件
+          # 防护检查：若 VER 仍意外为空则使用兜底值
+          [ -z "$VER" ] && VER="2026.94"
+
           curl -s https://matt.ucc.asn.au/dropbear/CHANGES -o DROPBEAR_CHANGES_RAW || \
-          curl -s https://raw.githubusercontent.com/mkj/dropbear/sysoptions/CHANGES -o DROPBEAR_CHANGES_RAW
+          curl -s https://raw.githubusercontent.com/mkj/dropbear/sysoptions/CHANGES -o DROPBEAR_CHANGES_RAW || true
           
-          tr -d '\r' < DROPBEAR_CHANGES_RAW > DROPBEAR_CHANGES
-          
-          CHANGES_CONTENT=$(awk -v ver="$VER" '
-            BEGIN { found = 0 }
-            $0 ~ ver " - " || $0 ~ ver " " { found = 1; print; next }
-            found && $0 ~ "^[0-9]{4}\\.[0-9]+" { found = 0; exit }
-            found { print }
-          ' DROPBEAR_CHANGES)
+          if [ -f DROPBEAR_CHANGES_RAW ]; then
+            tr -d '\r' < DROPBEAR_CHANGES_RAW > DROPBEAR_CHANGES
+            CHANGES_CONTENT=$(awk -v ver="$VER" '
+              BEGIN { found = 0 }
+              $0 ~ ver " - " || $0 ~ ver " " { found = 1; print; next }
+              found && $0 ~ "^[0-9]{4}\\.[0-9]+" { found = 0; exit }
+              found { print }
+            ' DROPBEAR_CHANGES || true)
+          fi
           
           if [ -z "$CHANGES_CONTENT" ]; then
              CHANGES_CONTENT="* 暂未在官方 CHANGES 中找到该版本的详细变更，请参考官方 GitHub Repository。"
@@ -113,7 +130,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VER="${{ needs.check-version.outputs.dropbear_ver }}"
-          
+          # 确保 VER 不为空
+          if [ -z "$VER" ]; then
+            echo "❌ 错误：dropbear_ver 变量为空，无法创建 Release！"
+            exit 1
+          fi
+
           cat << 'EOF' > release_body.md
           ## Dropbear SSH 纯静态编译版 (Zig + Musl)
           
@@ -142,7 +164,7 @@ jobs:
             gh release edit "$VER" --notes-file release_body.md --draft=false
             gh release upload "$VER" dist/*.tar.gz --clobber
           else
-            echo "🚀 正在首次创建公开 Release..."
+            echo "🚀 正在首次创建公开 Release Tag: $VER..."
             gh release create "$VER" dist/*.tar.gz \
               --title "Dropbear Static $VER" \
               --notes-file release_body.md
