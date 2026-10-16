@@ -1,0 +1,150 @@
+name: Auto Build and Release Static Dropbear
+
+on:
+  push: 
+    branches: ["main"]
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.compare.outputs.should_build }}
+      dropbear_ver: ${{ steps.compare.outputs.dropbear_ver }}
+    steps:
+      - name: Get Latest Dropbear Version
+        id: dropbear
+        run: |
+          VER=$(curl -s https://api.github.com/repos/mkj/dropbear/releases/latest | grep -oP '"tag_name":\s*"DROPBEAR_\K[0-9.]+' || true)
+          [ -z "$VER" ] && VER="2024.86"
+          echo "LATEST_VER=$VER" >> $GITHUB_ENV
+          echo "dropbear_ver=$VER" >> $GITHUB_OUTPUT
+
+      - name: Get Latest Release Tag from GitHub
+        id: github
+        run: |
+          LATEST_TAG=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | grep -oP '"tag_name":\s*"\K[0-9.]+' || echo "none")
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+
+      - name: Compare Versions
+        id: compare
+        run: |
+          echo "Dropbear 最新版本: ${{ env.LATEST_VER }}"
+          echo "当前 Release 版本: ${{ env.LATEST_TAG }}"
+          
+          if [ "${{ env.LATEST_VER }}" = "${{ env.LATEST_TAG }}" ]; then
+            echo "✅ 版本一致，无需更新。"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "🚀 检测到新版本！"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+
+  build-all:
+    needs: check-version
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.13.0
+
+      - name: Build All Architectures with Zig
+        run: |
+          chmod +x build.sh
+          ./build.sh  # 不传参数默认编译 amd64, arm64, armv7
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dropbear-static-binaries
+          path: output/*.tar.gz
+          retention-days: 1
+
+  release:
+    needs: [check-version, build-all]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dropbear-static-binaries
+          path: dist
+
+      - name: Fetch and Parse Dropbear Changes
+        id: parse_dropbear_changes
+        run: |
+          VER="${{ needs.check-version.outputs.dropbear_ver }}"
+          # 下载官方CHANGES文件
+          curl -s https://raw.githubusercontent.com/mkj/dropbear/sysoptions/CHANGES -o DROPBEAR_CHANGES_RAW || \
+          curl -s https://matt.ucc.asn.au/dropbear/CHANGES -o DROPBEAR_CHANGES_RAW
+          
+          tr -d '\r' < DROPBEAR_CHANGES_RAW > DROPBEAR_CHANGES
+          
+          # 提取当前版本的变更日志
+          CHANGES_CONTENT=$(awk -v ver="$VER" '
+            BEGIN { found = 0 }
+            $0 ~ ver " - " || $0 ~ ver " " { found = 1; print; next }
+            found && $0 ~ "^[0-9]{4}\\.[0-9]+" { found = 0; exit }
+            found { print }
+          ' DROPBEAR_CHANGES)
+          
+          if [ -z "$CHANGES_CONTENT" ]; then
+             CHANGES_CONTENT="* 暂未在官方 CHANGES 中找到该版本的详细变更，请参考官方 GitHub Repository。"
+          fi
+          
+          echo "dropbear_release_notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGES_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create or Update Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${{ needs.check-version.outputs.dropbear_ver }}"
+          
+          cat << 'EOF' > release_body.md
+          ## Dropbear SSH 纯静态编译版 (Zig + Musl)
+          
+          - **Dropbear 官方版本**: ${{ needs.check-version.outputs.dropbear_ver }}
+          - **构建工具**: Zig (`zig cc`) + Musl libc
+          - **包含架构**: `amd64` (x86_64), `arm64` (aarch64), `armv7`
+          - **特点**: 零动态库依赖，体积超小，开箱即用。
+          
+          ---
+          
+          ### 📜 Dropbear 官方变更日志 (${{ needs.check-version.outputs.dropbear_ver }})
+          ```text
+          ${{ steps.parse_dropbear_changes.outputs.dropbear_release_notes }}
+          ```
+          
+          ---
+          > 💡 **快速启动说明**:
+          > ```sh
+          > ./dropbearkey -t ed25519 -f host_key
+          > ./dropbear -F -E -p 2222 -r host_key
+          > ```
+          EOF
+
+          if gh release view "$VER" >/dev/null 2>&1; then
+            echo "🔄 检测到 Tag $VER 已存在！正在执行覆盖更新..."
+            gh release edit "$VER" --notes-file release_body.md --draft=false
+            gh release upload "$VER" dist/*.tar.gz --clobber
+          else
+            echo "🚀 正在首次创建公开 Release..."
+            gh release create "$VER" dist/*.tar.gz \
+              --title "Dropbear Static $VER" \
+              --notes-file release_body.md
+          fi
