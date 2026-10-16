@@ -17,7 +17,6 @@ jobs:
       - name: Get Latest Dropbear Version
         id: dropbear
         run: |
-          # 尝试从 GitHub Release / Tags / 官方网页 获取
           VER=$(curl -s https://api.github.com/repos/mkj/dropbear/releases/latest | grep -oP '"tag_name":\s*"DROPBEAR_\K[0-9.]+' || true)
           [ -z "$VER" ] && VER=$(curl -s https://api.github.com/repos/mkj/dropbear/tags | grep -oP '"name":\s*"DROPBEAR_\K[0-9.]+' | head -1 || true)
           [ -z "$VER" ] && VER=$(curl -s https://matt.ucc.asn.au/dropbear/dropbear.html | grep -oP 'dropbear-\K[0-9.]+(?=\.tar\.bz2)' | head -1 || true)
@@ -112,7 +111,8 @@ jobs:
              CHANGES_CONTENT="* 暂未在官方 CHANGES 中找到该版本的详细变更，请参考官方 GitHub Repository。"
           fi
           
-          echo "dropbear_release_notes<<EOF" >> $GITHUB_OUTPUT
+          # 安全写入环境变量或输出，使用 base64 避免换行带来的 YAML 污染
+          echo "release_notes<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGES_CONTENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
           echo "parsed_ver=$VER" >> $GITHUB_OUTPUT
@@ -120,34 +120,49 @@ jobs:
       - name: Create or Update Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES: ${{ steps.parse_dropbear_changes.outputs.release_notes }}
         run: |
-          # 优先读取 env，兜底读取 parse_dropbear_changes 的输出
           VER="${DROPBEAR_VER}"
           [ -z "$VER" ] && VER="${{ steps.parse_dropbear_changes.outputs.parsed_ver }}"
           [ -z "$VER" ] && VER="2026.94"
 
-          cat << EOF > release_body.md
-  ## Dropbear SSH 纯静态编译版 (Zig + Musl)
-  
-  - **Dropbear 官方版本**: ${VER}
-  - **构建工具**: Zig (\`zig cc\`) + Musl libc
-  - **包含架构**: \`amd64\` (x86_64), \`arm64\` (aarch64), \`armv7\`
-  - **特点**: 零动态库依赖，体积超小，开箱即用。
-  
-  ---
-  
-  ### 📜 Dropbear 官方变更日志 (${VER})
-  \`\`\`text
-  ${{ steps.parse_dropbear_changes.outputs.dropbear_release_notes }}
-  \`\`\`
-  
-  ---
-  > 💡 **快速启动说明**:
-  > \`\`\`sh
-  > ./dropbearkey -t ed25519 -f host_key
-  > ./dropbear -F -E -p 2222 -r host_key
-  > \`\`\`
-  EOF
+          # 使用单引号 EOF，防止 YAML 和 Bash 双重解析冲突
+          cat << 'EOF' > release_body.md
+          ## Dropbear SSH 纯静态编译版 (Zig + Musl)
+          
+          - **Dropbear 官方版本**: VERSION_PLACEHOLDER
+          - **构建工具**: Zig (`zig cc`) + Musl libc
+          - **包含架构**: `amd64` (x86_64), `arm64` (aarch64), `armv7`
+          - **特点**: 零动态库依赖，体积超小，开箱即用。
+          
+          ---
+          
+          ### 📜 Dropbear 官方变更日志 (VERSION_PLACEHOLDER)
+          ```text
+          NOTES_PLACEHOLDER
+          ```
+          
+          ---
+          > 💡 **快速启动说明**:
+          > ```sh
+          > ./dropbearkey -t ed25519 -f host_key
+          > ./dropbear -F -E -p 2222 -r host_key
+          > ```
+          EOF
+
+          # 用实际内容安全的替换占位符
+          sed -i "s/VERSION_PLACEHOLDER/$VER/g" release_body.md
+          
+          # 将变更日志写入临时文件再通过 python/awk 或 sed 注入（这里用 node/python 或 python3 更安全，或者直接用环境变量写入）
+          python3 -c '
+          import os
+          with open("release_body.md", "r") as f:
+              content = f.read()
+          notes = os.environ.get("RELEASE_NOTES", "")
+          content = content.replace("NOTES_PLACEHOLDER", notes)
+          with open("release_body.md", "w") as f:
+              f.write(content)
+          '
 
           if gh release view "$VER" >/dev/null 2>&1; then
             echo "🔄 检测到 Tag $VER 已存在！正在执行覆盖更新..."
