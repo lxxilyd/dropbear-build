@@ -96,12 +96,10 @@ build_target() {
 
     # 针对不同 ARM 架构配置兼容和优化 CFLAGS，避开 configure 检测报错
     EXTRA_FLAGS="-static -O3"
-    if [ "$target_arch" = "armv7" ]; then
-        EXTRA_FLAGS="-static -O3 -mcpu=cortex-a7"
-    elif [ "$target_arch" = "armv6" ]; then
-        EXTRA_FLAGS="-static -O3 -march=armv6"
-    elif [ "$target_arch" = "armv5" ]; then
-        EXTRA_FLAGS="-static -O3 -march=armv5t -mfloat-abi=soft"
+    if [ "$target_arch" = "armhf" ]; then
+        EXTRA_FLAGS="-static -O3"
+    elif [ "$target_arch" = "arm" ]; then
+        EXTRA_FLAGS="-static -O3 -mfloat-abi=soft"
     fi
 
     make PROGRAMS="dropbear dbclient dropbearkey dropbearconvert scp" \
@@ -135,23 +133,19 @@ case "$ARCH_ARG" in
     arm64)
         build_target "arm64" "aarch64-linux-musl" "aarch64-linux"
         ;;
-    armv7)
+    armhf)
         # 恢复标准的 armv7 硬浮点三元组，通过 CFLAGS 限制微架构
-        build_target "armv7" "arm-linux-musleabihf" "arm-linux"
+        build_target "armhf" "arm-linux-musleabihf" "arm-linux"
         ;;
-    armv6)
-        build_target "armv6" "arm-linux-musleabi" "arm-linux"
-        ;;
-    armv5)
-        build_target "armv5" "arm-linux-musleabi" "arm-linux"
+    arm)
+        build_target "arm" "arm-linux-musleabi" "arm-linux"
         ;;
     *)
-        echo -e "${YELLOW}未指定特定架构，一次性编译所有架构 (amd64, arm64, armv7, armv6, armv5)...${NC}"
+        echo -e "${YELLOW}未指定特定架构，一次性编译所有架构 (amd64, arm64, armhf, arm)...${NC}"
         build_target "amd64" "x86_64-linux-musl" "x86_64-linux"
         build_target "arm64" "aarch64-linux-musl" "aarch64-linux"
-        build_target "armv7" "arm-linux-musleabihf" "arm-linux"
-        build_target "armv6" "arm-linux-musleabi" "arm-linux"
-        build_target "armv5" "arm-linux-musleabi" "arm-linux"
+        build_target "armhf" "arm-linux-musleabihf" "arm-linux"
+        build_target "arm" "arm-linux-musleabi" "arm-linux"
         ;;
 esac
 
