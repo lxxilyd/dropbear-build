@@ -144,8 +144,8 @@ case "$ARCH_ARG" in
         echo -e "${YELLOW}未指定特定架构，一次性编译所有架构 (amd64, arm64, armhf, arm)...${NC}"
         build_target "amd64" "x86_64-linux-musl" "x86_64-linux"
         build_target "arm64" "aarch64-linux-musl" "aarch64-linux"
-        build_target "armhf" "arm-linux-musleabihf" "arm-linux"
-        build_target "arm" "arm-linux-musleabi" "arm-linux"
+        build_target "armhf" "arm-linux-gnueabihf" "arm-linux"
+        build_target "arm" "arm-linux-gnueabi" "arm-linux"
         ;;
 esac
 
