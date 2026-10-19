@@ -88,24 +88,23 @@ build_target() {
     export AR="zig ar"
     export RANLIB="zig ranlib"
 
+    # 针对 arm 软浮点目标，通过 CFLAGS 强制指定最基础的 armv5te 架构与软浮点模式，剥离高级指令
+    EXTRA_CFLAGS="-static -O3"
+    if [ "$target_arch" = "arm" ]; then
+        EXTRA_CFLAGS="-static -Os -march=armv5te -mfloat-abi=soft -fno-stack-protector"
+    fi
+
     ./configure \
         --host="${host_gnu}" \
         --disable-zlib \
         --disable-pam \
-        --disable-syslog
-
-    # 针对不同 ARM 架构配置兼容和优化 CFLAGS，避开 configure 检测报错
-    EXTRA_FLAGS="-static -O3"
-    if [ "$target_arch" = "armhf" ]; then
-        EXTRA_FLAGS="-static -O3"
-    elif [ "$target_arch" = "arm" ]; then
-        EXTRA_FLAGS="-static -O3 -mfloat-abi=soft"
-    fi
+        --disable-syslog \
+        --disable-pie
 
     make PROGRAMS="dropbear dbclient dropbearkey dropbearconvert scp" \
          MULTILINK=1 \
          STATIC=1 \
-         EXTRA_CFLAGS="${EXTRA_FLAGS}" \
+         EXTRA_CFLAGS="${EXTRA_CFLAGS}" \
          -j$(nproc)
 
     DIST_DIR="dropbear-static-${target_arch}"
@@ -144,8 +143,8 @@ case "$ARCH_ARG" in
         echo -e "${YELLOW}未指定特定架构，一次性编译所有架构 (amd64, arm64, armhf, arm)...${NC}"
         build_target "amd64" "x86_64-linux-musl" "x86_64-linux"
         build_target "arm64" "aarch64-linux-musl" "aarch64-linux"
-        build_target "armhf" "arm-linux-gnueabihf" "arm-linux"
-        build_target "arm" "arm-linux-gnueabi" "arm-linux"
+        build_target "armhf" "arm-linux-musleabihf" "arm-linux"
+        build_target "arm" "arm-linux-musleabi" "arm-linux"
         ;;
 esac
 
