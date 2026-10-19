@@ -84,7 +84,13 @@ build_target() {
     cp -r dropbear-src/* "${BUILD_DIR}/"
     cd "${BUILD_DIR}"
 
-    export CC="zig cc -target ${zig_target}"
+    # 针对 32位 ARM (armv7, armv6, armv5) 强制加入 -mcpu=generic+softfloat 消除特化指令
+    CC_FLAGS=""
+    if [[ "$target_arch" =~ ^armv[567]$ ]]; then
+        CC_FLAGS="-mcpu=generic+softfloat"
+    fi
+
+    export CC="zig cc -target ${zig_target} ${CC_FLAGS}"
     export AR="zig ar"
     export RANLIB="zig ranlib"
 
@@ -115,7 +121,7 @@ build_target() {
     echo -e "${GREEN}✅ ${target_arch} 构建成功！文件: output/${TAR_NAME}${NC}"
 }
 
-# 5. 根据参数构建对应架构或全量构建 (支持 amd64, arm64, armv7, armv6, armv5)
+# 5. 根据参数构建对应架构或全量构建
 ARCH_ARG=$1
 
 case "$ARCH_ARG" in
@@ -126,17 +132,21 @@ case "$ARCH_ARG" in
         build_target "arm64" "aarch64-linux-musl" "aarch64-linux"
         ;;
     armv7)
-        build_target "armv7" "arm-linux-musleabihf" "arm-linux"
+        build_target "armv7" "arm-linux-musleabi" "arm-linux"
         ;;
     armv6)
         build_target "armv6" "arm-linux-musleabi" "arm-linux"
+        ;;
+    armv5)
+        build_target "armv5" "arm-linux-musleabi" "arm-linux"
         ;;
     *)
         echo -e "${YELLOW}未指定特定架构，一次性编译所有架构 (amd64, arm64, armv7, armv6, armv5)...${NC}"
         build_target "amd64" "x86_64-linux-musl" "x86_64-linux"
         build_target "arm64" "aarch64-linux-musl" "aarch64-linux"
-        build_target "armv7" "arm-linux-musleabihf" "arm-linux"
+        build_target "armv7" "arm-linux-musleabi" "arm-linux"
         build_target "armv6" "arm-linux-musleabi" "arm-linux"
+        build_target "armv5" "arm-linux-musleabi" "arm-linux"
         ;;
 esac
 
