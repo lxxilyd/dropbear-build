@@ -111,7 +111,6 @@ jobs:
              CHANGES_CONTENT="* 暂未在官方 CHANGES 中找到该版本的详细变更，请参考官方 GitHub Repository。"
           fi
           
-          # 安全写入环境变量或输出，使用 base64 避免换行带来的 YAML 污染
           echo "release_notes<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGES_CONTENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -126,13 +125,12 @@ jobs:
           [ -z "$VER" ] && VER="${{ steps.parse_dropbear_changes.outputs.parsed_ver }}"
           [ -z "$VER" ] && VER="2026.94"
 
-          # 使用单引号 EOF，防止 YAML 和 Bash 双重解析冲突
           cat << 'EOF' > release_body.md
           ## Dropbear SSH 纯静态编译版 (Zig + Musl)
           
           - **Dropbear 官方版本**: VERSION_PLACEHOLDER
           - **构建工具**: Zig (`zig cc`) + Musl libc
-          - **包含架构**: `amd64` (x86_64), `arm64` (aarch64), `armv7`
+          - **包含架构**: `amd64`, `arm64`, `armv7`, `armv6`, `armv5`
           - **特点**: 零动态库依赖，体积超小，开箱即用。
           
           ---
@@ -150,10 +148,8 @@ jobs:
           > ```
           EOF
 
-          # 用实际内容安全的替换占位符
           sed -i "s/VERSION_PLACEHOLDER/$VER/g" release_body.md
           
-          # 将变更日志写入临时文件再通过 python/awk 或 sed 注入（这里用 node/python 或 python3 更安全，或者直接用环境变量写入）
           python3 -c '
           import os
           with open("release_body.md", "r") as f:

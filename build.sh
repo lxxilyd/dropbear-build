@@ -69,8 +69,8 @@ mkdir -p "${OUTPUT_DIR}"
 
 # 4. 单架构编译函数
 build_target() {
-    local target_arch=$1      # 架构名称，如 amd64, arm64, armv7
-    local zig_target=$2       # Zig 目标三元组，如 x86_64-linux-musl
+    local target_arch=$1      # 架构名称，如 amd64, arm64, armv7, armv6, armv5
+    local zig_target=$2       # Zig 目标三元组
     local host_gnu=$3         # configure --host
     
     echo -e "\n${YELLOW}========================================${NC}"
@@ -108,7 +108,6 @@ build_target() {
     ln -sf dropbear "${DIST_DIR}/dbclient"
 
     TAR_NAME="dropbear-${DROPBEAR_VERSION}-static-${target_arch}.tar.gz"
-    # 使用绝对路径写入，避免相对路径层级混乱
     tar -czf "${OUTPUT_DIR}/${TAR_NAME}" -C "${DIST_DIR}" .
     
     cd ..
@@ -116,7 +115,7 @@ build_target() {
     echo -e "${GREEN}✅ ${target_arch} 构建成功！文件: output/${TAR_NAME}${NC}"
 }
 
-# 5. 根据参数构建对应架构或全量构建
+# 5. 根据参数构建对应架构或全量构建 (支持 amd64, arm64, armv7, armv6, armv5)
 ARCH_ARG=$1
 
 case "$ARCH_ARG" in
@@ -129,11 +128,19 @@ case "$ARCH_ARG" in
     armv7)
         build_target "armv7" "arm-linux-musleabihf" "arm-linux"
         ;;
+    armv6)
+        build_target "armv6" "arm-linux-musleabi" "arm-linux"
+        ;;
+    armv5)
+        build_target "armv5" "armv5tel-linux-musleabi" "arm-linux"
+        ;;
     *)
-        echo -e "${YELLOW}未指定特定架构，一次性编译所有架构 (amd64, arm64, armv7)...${NC}"
+        echo -e "${YELLOW}未指定特定架构，一次性编译所有架构 (amd64, arm64, armv7, armv6, armv5)...${NC}"
         build_target "amd64" "x86_64-linux-musl" "x86_64-linux"
         build_target "arm64" "aarch64-linux-musl" "aarch64-linux"
         build_target "armv7" "arm-linux-musleabihf" "arm-linux"
+        build_target "armv6" "arm-linux-musleabi" "arm-linux"
+        build_target "armv5" "armv5tel-linux-musleabi" "arm-linux"
         ;;
 esac
 
