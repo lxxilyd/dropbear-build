@@ -131,16 +131,12 @@ case "$ARCH_ARG" in
     armv6)
         build_target "armv6" "arm-linux-musleabi" "arm-linux"
         ;;
-    armv5)
-        build_target "armv5" "armv5tel-linux-musleabi" "arm-linux"
-        ;;
     *)
         echo -e "${YELLOW}未指定特定架构，一次性编译所有架构 (amd64, arm64, armv7, armv6, armv5)...${NC}"
         build_target "amd64" "x86_64-linux-musl" "x86_64-linux"
         build_target "arm64" "aarch64-linux-musl" "aarch64-linux"
         build_target "armv7" "arm-linux-musleabihf" "arm-linux"
         build_target "armv6" "arm-linux-musleabi" "arm-linux"
-        build_target "armv5" "armv5tel-linux-musleabi" "arm-linux"
         ;;
 esac
 
