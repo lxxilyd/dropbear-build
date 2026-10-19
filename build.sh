@@ -101,7 +101,7 @@ build_target() {
     elif [ "$target_arch" = "armv6" ]; then
         EXTRA_FLAGS="-static -O3 -march=armv6"
     elif [ "$target_arch" = "armv5" ]; then
-        EXTRA_FLAGS="-static -O3 -march=armv5t"
+        EXTRA_FLAGS="-static -O3 -march=armv5t -mfloat-abi=soft"
     fi
 
     make PROGRAMS="dropbear dbclient dropbearkey dropbearconvert scp" \
